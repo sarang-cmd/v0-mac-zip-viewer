@@ -1,9 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'export',
+  images: { unoptimized: true },
+
   typescript: {
     ignoreBuildErrors: true,
   },
-  serverExternalPackages: ['jszip'],
 }
 
 export default nextConfig
