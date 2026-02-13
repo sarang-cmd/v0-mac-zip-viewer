@@ -5,10 +5,14 @@ import type {
   TreeNode,
   FolderNode,
   FilterType,
+  FavoriteItem,
+  EditorTab,
+  PreviewMode,
   ParseResponse,
 } from "@/lib/types";
-import { FILE_CATEGORIES } from "@/lib/types";
-import { buildExport, downloadJson } from "@/lib/export-utils";
+import { FILE_CATEGORIES, getLanguageFromExtension, TEXT_EXTENSIONS } from "@/lib/types";
+import { buildExport, buildManifest, downloadJson } from "@/lib/export-utils";
+import { getZipEngine, resetZipEngine } from "@/lib/zip-engine";
 import { Toolbar } from "./toolbar";
 import { Sidebar } from "./sidebar";
 import { TreeView } from "./tree-view";
@@ -17,6 +21,8 @@ import { Breadcrumbs } from "./breadcrumbs";
 import { DropZone } from "./drop-zone";
 import { ContextMenu } from "./context-menu";
 import { SearchResults } from "./search-results";
+import { QuickLook } from "./preview/quick-look";
+import { CodeEditor } from "./editor/code-editor";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -81,6 +87,25 @@ function matchesFilter(node: TreeNode, filter: FilterType): boolean {
   return false;
 }
 
+// ── Local storage helpers for favorites ──────────────────────────────
+
+function loadFavorites(): FavoriteItem[] {
+  try {
+    const raw = typeof window !== "undefined" ? localStorage.getItem("zip-explorer-favorites") : null;
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFavorites(items: FavoriteItem[]): void {
+  try {
+    localStorage.setItem("zip-explorer-favorites", JSON.stringify(items));
+  } catch {
+    // ignore
+  }
+}
+
 // ── Main Component ───────────────────────────────────────────────────
 
 export function ZipExplorer() {
@@ -89,6 +114,7 @@ export function ZipExplorer() {
   const [zipFileName, setZipFileName] = useState<string>("");
   const [metadata, setMetadata] = useState<ParseResponse["metadata"] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   // UI state
@@ -98,34 +124,59 @@ export function ZipExplorer() {
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewMode, setPreviewMode] = useState<PreviewMode>("preview");
+  const [parseMode, setParseMode] = useState<"client" | "server">("client");
+
+  // Context menu
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
     node: TreeNode;
   } | null>(null);
 
+  // Favorites & recents
+  const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
+  const [recentPaths, setRecentPaths] = useState<string[]>([]);
+
+  // Editor tabs
+  const [editorTabs, setEditorTabs] = useState<EditorTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [showEditor, setShowEditor] = useState(false);
+
+  // Draggable divider state
+  const [sidebarWidth, setSidebarWidth] = useState(208);
+  const [previewWidth, setPreviewWidth] = useState(350);
+  const sidebarResizeRef = useRef<{ startX: number; startW: number } | null>(null);
+  const previewResizeRef = useRef<{ startX: number; startW: number } | null>(null);
+
   // Global drag-and-drop overlay
   const [isDragOverWindow, setIsDragOverWindow] = useState(false);
   const dragCounterRef = useRef(0);
 
+  // Load favorites from localStorage on mount
+  useEffect(() => {
+    setFavorites(loadFavorites());
+  }, []);
+
+  // Save favorites on change
+  useEffect(() => {
+    saveFavorites(favorites);
+  }, [favorites]);
+
+  // Global drag & drop
   useEffect(() => {
     const handleDragEnter = (e: DragEvent) => {
       e.preventDefault();
       dragCounterRef.current++;
-      if (dragCounterRef.current === 1) {
-        setIsDragOverWindow(true);
-      }
+      if (dragCounterRef.current === 1) setIsDragOverWindow(true);
     };
     const handleDragLeave = (e: DragEvent) => {
       e.preventDefault();
       dragCounterRef.current--;
-      if (dragCounterRef.current === 0) {
-        setIsDragOverWindow(false);
-      }
+      if (dragCounterRef.current === 0) setIsDragOverWindow(false);
     };
-    const handleDragOver = (e: DragEvent) => {
-      e.preventDefault();
-    };
+    const handleDragOver = (e: DragEvent) => e.preventDefault();
     const handleDrop = (e: DragEvent) => {
       e.preventDefault();
       dragCounterRef.current = 0;
@@ -138,7 +189,6 @@ export function ZipExplorer() {
         }
       }
     };
-
     window.addEventListener("dragenter", handleDragEnter);
     window.addEventListener("dragleave", handleDragLeave);
     window.addEventListener("dragover", handleDragOver);
@@ -149,7 +199,35 @@ export function ZipExplorer() {
       window.removeEventListener("dragover", handleDragOver);
       window.removeEventListener("drop", handleDrop);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sidebar divider dragging
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (sidebarResizeRef.current) {
+        const delta = e.clientX - sidebarResizeRef.current.startX;
+        const newWidth = Math.max(160, Math.min(400, sidebarResizeRef.current.startW + delta));
+        setSidebarWidth(newWidth);
+      }
+      if (previewResizeRef.current) {
+        const delta = previewResizeRef.current.startX - e.clientX;
+        const newWidth = Math.max(250, Math.min(600, previewResizeRef.current.startW + delta));
+        setPreviewWidth(newWidth);
+      }
+    };
+    const handleMouseUp = () => {
+      sidebarResizeRef.current = null;
+      previewResizeRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
   }, []);
 
   // Selected node
@@ -167,16 +245,11 @@ export function ZipExplorer() {
   // Filter counts
   const fileCounts = useMemo<Record<FilterType, number>>(() => {
     const counts: Record<FilterType, number> = {
-      all: 0,
-      folders: 0,
-      files: 0,
-      images: 0,
-      code: 0,
-      documents: 0,
-      archives: 0,
+      all: 0, folders: 0, files: 0, images: 0, code: 0,
+      documents: 0, archives: 0, audio: 0, video: 0,
     };
     for (const node of allNodes) {
-      if (node.id === tree?.id) continue; // skip root
+      if (node.id === tree?.id) continue;
       counts.all++;
       if (node.type === "folder") counts.folders++;
       else counts.files++;
@@ -195,65 +268,82 @@ export function ZipExplorer() {
   const searchResults = useMemo(() => {
     if (!searchQuery && activeFilter === "all") return null;
     let results = allNodes.filter((n) => n.id !== tree?.id);
-
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       results = results.filter(
-        (n) =>
-          n.name.toLowerCase().includes(q) ||
-          n.fullPath.toLowerCase().includes(q)
+        (n) => n.name.toLowerCase().includes(q) || n.fullPath.toLowerCase().includes(q)
       );
     }
-
     if (activeFilter !== "all") {
       results = results.filter((n) => matchesFilter(n, activeFilter));
     }
-
     return results;
   }, [allNodes, searchQuery, activeFilter, tree]);
+
+  const hasDirtyTabs = editorTabs.some((t) => t.isDirty);
 
   // ── Handlers ─────────────────────────────────────────────────────
 
   const handleFileSelect = useCallback(async (file: File) => {
     setIsLoading(true);
+    setLoadingProgress(0);
     setError(null);
     setTree(null);
     setSelectedId(null);
     setSearchQuery("");
     setActiveFilter("all");
     setExpandedIds(new Set());
+    setEditorTabs([]);
+    setActiveTabId(null);
+    setShowEditor(false);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const res = await fetch("/api/zip/parse", {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await res.json();
-
-      if (!data.success) {
-        setError(data.error || "Failed to parse ZIP file.");
-        return;
+      if (parseMode === "client") {
+        const engine = resetZipEngine();
+        const buffer = await file.arrayBuffer();
+        setLoadingProgress(20);
+        const result = await engine.loadFromBuffer(buffer, file.name, (pct) => {
+          setLoadingProgress(20 + Math.round(pct * 0.7));
+        });
+        setTree(result.tree);
+        setZipFileName(file.name);
+        setMetadata({
+          zipFileName: file.name,
+          totalFiles: result.totalFiles,
+          totalFolders: result.totalFolders,
+          totalSize: result.totalSize,
+          totalCompressedSize: result.totalCompressedSize,
+          entryCount: result.entryCount,
+        });
+        setExpandedIds(new Set([result.tree.id]));
+        setLoadingProgress(100);
+      } else {
+        setLoadingProgress(10);
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await fetch("/api/zip/parse", { method: "POST", body: formData });
+        setLoadingProgress(80);
+        const data = await res.json();
+        if (!data.success) {
+          setError(data.error || "Failed to parse ZIP file.");
+          return;
+        }
+        const response = data as ParseResponse;
+        setTree(response.tree);
+        setZipFileName(response.metadata.zipFileName);
+        setMetadata(response.metadata);
+        setExpandedIds(new Set([response.tree.id]));
+        setLoadingProgress(100);
       }
-
-      const response = data as ParseResponse;
-      setTree(response.tree);
-      setZipFileName(response.metadata.zipFileName);
-      setMetadata(response.metadata);
-
-      // Auto-expand root
-      setExpandedIds(new Set([response.tree.id]));
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "An unknown error occurred."
-      );
+      setError(err instanceof Error ? err.message : "An unknown error occurred.");
     } finally {
-      setIsLoading(false);
+      setTimeout(() => {
+        setIsLoading(false);
+        setLoadingProgress(0);
+      }, 300);
     }
-  }, []);
+  }, [parseMode]);
 
   const handleToggle = useCallback((id: string) => {
     setExpandedIds((prev) => {
@@ -266,6 +356,11 @@ export function ZipExplorer() {
 
   const handleSelect = useCallback((node: TreeNode) => {
     setSelectedId(node.id);
+    // Add to recents
+    setRecentPaths((prev) => {
+      const filtered = prev.filter((p) => p !== node.fullPath);
+      return [node.fullPath, ...filtered].slice(0, 10);
+    });
   }, []);
 
   const handleSearch = useCallback((query: string) => {
@@ -282,15 +377,22 @@ export function ZipExplorer() {
     [tree, zipFileName]
   );
 
-  const handleExportSelected = useCallback(
-    (format: "tree" | "flat") => {
-      if (!tree || !selectedNode) return;
-      const payload = buildExport(tree, zipFileName, format, selectedNode);
-      const filename = `${selectedNode.name}-${format}.json`;
-      downloadJson(payload, filename);
-    },
-    [tree, zipFileName, selectedNode]
-  );
+  const handleExportManifest = useCallback(() => {
+    if (!tree || !metadata) return;
+    const manifest = buildManifest(tree, zipFileName, metadata.totalCompressedSize);
+    const filename = `${zipFileName.replace(/\.zip$/i, "")}-manifest.json`;
+    downloadJson(manifest, filename);
+  }, [tree, zipFileName, metadata]);
+
+  const handleDownloadZip = useCallback(async () => {
+    try {
+      const engine = getZipEngine();
+      if (!engine.isLoaded()) return;
+      await engine.downloadZip();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to download ZIP.");
+    }
+  }, []);
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, node: TreeNode) => {
@@ -317,10 +419,8 @@ export function ZipExplorer() {
   const handleRevealInTree = useCallback(
     (node: TreeNode) => {
       if (!tree) return;
-      // Clear search to show tree
       setSearchQuery("");
       setActiveFilter("all");
-      // Expand ancestors
       const ancestors = getAncestorIds(tree, node.id);
       setExpandedIds((prev) => {
         const next = new Set(prev);
@@ -332,13 +432,69 @@ export function ZipExplorer() {
     [tree]
   );
 
+  const handleAddFavorite = useCallback(
+    (node: TreeNode) => {
+      setFavorites((prev) => {
+        if (prev.find((f) => f.path === node.fullPath)) return prev;
+        return [
+          ...prev,
+          {
+            path: node.fullPath,
+            name: node.name,
+            type: node.type,
+            addedAt: new Date().toISOString(),
+          },
+        ];
+      });
+    },
+    []
+  );
+
+  const handleRemoveFavorite = useCallback((path: string) => {
+    setFavorites((prev) => prev.filter((f) => f.path !== path));
+  }, []);
+
+  const handleFavoriteSelect = useCallback(
+    (path: string) => {
+      if (!tree) return;
+      const node = findNodeByPath(tree, path);
+      if (node) {
+        const ancestors = getAncestorIds(tree, node.id);
+        setExpandedIds((prev) => {
+          const next = new Set(prev);
+          for (const id of ancestors) next.add(id);
+          next.add(node.id);
+          return next;
+        });
+        setSelectedId(node.id);
+      }
+    },
+    [tree]
+  );
+
+  const handleRecentSelect = useCallback(
+    (path: string) => {
+      if (!tree) return;
+      const node = findNodeByPath(tree, path);
+      if (node) {
+        const ancestors = getAncestorIds(tree, node.id);
+        setExpandedIds((prev) => {
+          const next = new Set(prev);
+          for (const id of ancestors) next.add(id);
+          return next;
+        });
+        setSelectedId(node.id);
+      }
+    },
+    [tree]
+  );
+
   const handleBreadcrumbNavigate = useCallback(
     (path: string) => {
       if (!tree) return;
       const node = findNodeByPath(tree, path);
       if (node) {
         setSelectedId(node.id);
-        // Expand ancestors
         const ancestors = getAncestorIds(tree, node.id);
         setExpandedIds((prev) => {
           const next = new Set(prev);
@@ -351,10 +507,113 @@ export function ZipExplorer() {
     [tree]
   );
 
+  // ── Editor handlers ──────────────────────────────────────────────
+
+  const handleOpenInEditor = useCallback(
+    async (filePath: string) => {
+      const existing = editorTabs.find((t) => t.filePath === filePath);
+      if (existing) {
+        setActiveTabId(existing.id);
+        setShowEditor(true);
+        return;
+      }
+
+      try {
+        const engine = getZipEngine();
+        const content = await engine.getFileAsText(filePath);
+        const fileName = filePath.split("/").pop() || filePath;
+        const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
+        const tab: EditorTab = {
+          id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          filePath,
+          fileName,
+          content,
+          originalContent: content,
+          language: getLanguageFromExtension(ext),
+          isDirty: false,
+        };
+        setEditorTabs((prev) => [...prev, tab]);
+        setActiveTabId(tab.id);
+        setShowEditor(true);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to open file.");
+      }
+    },
+    [editorTabs]
+  );
+
+  const handleTabChange = useCallback((id: string) => {
+    setActiveTabId(id);
+  }, []);
+
+  const handleTabClose = useCallback(
+    (id: string) => {
+      setEditorTabs((prev) => {
+        const filtered = prev.filter((t) => t.id !== id);
+        if (activeTabId === id) {
+          setActiveTabId(filtered.length > 0 ? filtered[filtered.length - 1].id : null);
+        }
+        if (filtered.length === 0) setShowEditor(false);
+        return filtered;
+      });
+    },
+    [activeTabId]
+  );
+
+  const handleContentChange = useCallback((id: string, content: string) => {
+    setEditorTabs((prev) =>
+      prev.map((t) =>
+        t.id === id ? { ...t, content, isDirty: content !== t.originalContent } : t
+      )
+    );
+  }, []);
+
+  const handleSave = useCallback(
+    (id: string) => {
+      const tab = editorTabs.find((t) => t.id === id);
+      if (!tab) return;
+      try {
+        const engine = getZipEngine();
+        engine.updateFile(tab.filePath, tab.content);
+        setEditorTabs((prev) =>
+          prev.map((t) =>
+            t.id === id ? { ...t, originalContent: t.content, isDirty: false } : t
+          )
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save file.");
+      }
+    },
+    [editorTabs]
+  );
+
+  // ── Divider drag ─────────────────────────────────────────────────
+
+  const handleSidebarDividerMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      sidebarResizeRef.current = { startX: e.clientX, startW: sidebarWidth };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [sidebarWidth]
+  );
+
+  const handlePreviewDividerMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      previewResizeRef.current = { startX: e.clientX, startW: previewWidth };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [previewWidth]
+  );
+
   const isShowingSearch = searchResults !== null;
+  const isFavorite = selectedNode ? favorites.some((f) => f.path === selectedNode.fullPath) : false;
 
   return (
-    <div className="h-screen flex flex-col bg-background overflow-hidden relative">
+    <div className="h-screen flex flex-col bg-[hsl(var(--mac-bg))] overflow-hidden relative">
       {/* Drag overlay */}
       {isDragOverWindow && tree && (
         <div className="absolute inset-0 z-40 bg-[hsl(var(--mac-selection)/0.08)] border-2 border-dashed border-[hsl(var(--mac-selection))] rounded-lg flex items-center justify-center pointer-events-none">
@@ -372,41 +631,74 @@ export function ZipExplorer() {
         onSearch={handleSearch}
         searchQuery={searchQuery}
         onExport={handleExport}
-        onExportSelected={handleExportSelected}
+        onExportManifest={handleExportManifest}
+        onDownloadZip={handleDownloadZip}
         hasData={tree !== null}
         hasSelection={selectedNode !== null}
+        hasDirtyTabs={hasDirtyTabs}
         entryCount={metadata?.entryCount ?? 0}
         totalSize={metadata?.totalSize ?? 0}
         isLoading={isLoading}
+        loadingProgress={loadingProgress}
         inspectorOpen={inspectorOpen}
         onToggleInspector={() => setInspectorOpen((p) => !p)}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((p) => !p)}
+        previewOpen={previewOpen}
+        onTogglePreview={() => setPreviewOpen((p) => !p)}
         zipFileName={zipFileName}
+        parseMode={parseMode}
+        onParseModeChange={setParseMode}
       />
 
       {/* Error banner */}
       {error && (
-        <div className="px-4 py-2 bg-[hsl(var(--destructive)/0.1)] border-b border-[hsl(var(--destructive)/0.2)]">
-          <p className="text-xs text-[hsl(var(--destructive))]">{error}</p>
+        <div className="px-4 py-2 bg-[hsl(0,60%,50%,0.1)] border-b border-[hsl(0,60%,50%,0.2)]">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-[hsl(0,60%,50%)]">{error}</p>
+            <button
+              onClick={() => setError(null)}
+              className="text-xs text-[hsl(0,60%,50%)] hover:underline mac-focus-ring rounded"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
       {/* Main content area */}
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar */}
-        <Sidebar
-          zipFileName={tree ? zipFileName : null}
-          activeFilter={activeFilter}
-          onFilterChange={setActiveFilter}
-          fileCounts={fileCounts}
-          isOpen={sidebarOpen}
-        />
+        {sidebarOpen && (
+          <>
+            <div style={{ width: sidebarWidth }} className="flex-shrink-0">
+              <Sidebar
+                zipFileName={tree ? zipFileName : null}
+                activeFilter={activeFilter}
+                onFilterChange={setActiveFilter}
+                fileCounts={fileCounts}
+                isOpen={sidebarOpen}
+                favorites={favorites}
+                recentPaths={recentPaths}
+                onFavoriteSelect={handleFavoriteSelect}
+                onRemoveFavorite={handleRemoveFavorite}
+                onRecentSelect={handleRecentSelect}
+              />
+            </div>
+            {/* Draggable divider */}
+            <div
+              className="w-1 flex-shrink-0 cursor-col-resize hover:bg-[hsl(var(--mac-selection)/0.3)] mac-transition relative group"
+              onMouseDown={handleSidebarDividerMouseDown}
+            >
+              <div className="absolute inset-y-0 -left-1 -right-1" />
+            </div>
+          </>
+        )}
 
-        {/* Center: tree or drop zone */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Center: tree / drop zone / editor */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {/* Breadcrumbs */}
-          {tree && selectedNode && !isShowingSearch && (
+          {tree && selectedNode && !isShowingSearch && !showEditor && (
             <Breadcrumbs
               path={selectedNode.fullPath}
               rootName={tree.name}
@@ -414,7 +706,30 @@ export function ZipExplorer() {
             />
           )}
 
-          {!tree && !isLoading ? (
+          {/* Editor or tree view */}
+          {showEditor && editorTabs.length > 0 ? (
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between px-2 py-1 border-b border-[hsl(var(--mac-separator))] bg-[hsl(var(--mac-hover)/0.3)]">
+                <span className="text-[10px] font-medium text-[hsl(var(--mac-text-tertiary))] uppercase tracking-wider">
+                  Editor
+                </span>
+                <button
+                  onClick={() => setShowEditor(false)}
+                  className="text-[10px] px-2 py-0.5 rounded mac-transition mac-focus-ring text-[hsl(var(--mac-selection))] hover:bg-[hsl(var(--mac-selection)/0.1)]"
+                >
+                  Back to Tree
+                </button>
+              </div>
+              <CodeEditor
+                tabs={editorTabs}
+                activeTabId={activeTabId}
+                onTabChange={handleTabChange}
+                onTabClose={handleTabClose}
+                onContentChange={handleContentChange}
+                onSave={handleSave}
+              />
+            </div>
+          ) : !tree && !isLoading ? (
             <DropZone onFileSelect={handleFileSelect} isLoading={isLoading} />
           ) : isLoading && !tree ? (
             <DropZone onFileSelect={handleFileSelect} isLoading={isLoading} />
@@ -441,6 +756,34 @@ export function ZipExplorer() {
           ) : null}
         </div>
 
+        {/* Preview panel (Quick Look) */}
+        {previewOpen && tree && (
+          <>
+            <div
+              className="w-1 flex-shrink-0 cursor-col-resize hover:bg-[hsl(var(--mac-selection)/0.3)] mac-transition relative group"
+              onMouseDown={handlePreviewDividerMouseDown}
+            >
+              <div className="absolute inset-y-0 -left-1 -right-1" />
+            </div>
+            <div
+              style={{ width: previewWidth }}
+              className="flex-shrink-0 mac-inspector flex flex-col h-full overflow-hidden"
+            >
+              <div className="px-3 py-1.5 border-b border-[hsl(var(--mac-separator))] bg-[hsl(var(--mac-hover)/0.3)]">
+                <span className="text-[10px] font-medium text-[hsl(var(--mac-text-tertiary))] uppercase tracking-wider">
+                  Quick Look
+                </span>
+              </div>
+              <QuickLook
+                node={selectedNode}
+                mode={previewMode}
+                onModeChange={setPreviewMode}
+                onOpenInEditor={handleOpenInEditor}
+              />
+            </div>
+          </>
+        )}
+
         {/* Inspector panel */}
         <Inspector node={selectedNode} isOpen={inspectorOpen && tree !== null} />
       </div>
@@ -455,6 +798,15 @@ export function ZipExplorer() {
           onCopyPath={handleCopyPath}
           onExportSubtree={handleExportSubtree}
           onRevealInTree={handleRevealInTree}
+          onAddFavorite={handleAddFavorite}
+          onOpenInEditor={
+            contextMenu.node.type === "file" &&
+            TEXT_EXTENSIONS.has(contextMenu.node.extension)
+              ? handleOpenInEditor
+              : undefined
+          }
+          isFavorite={favorites.some((f) => f.path === contextMenu.node.fullPath)}
+          onRemoveFavorite={handleRemoveFavorite}
         />
       )}
     </div>
