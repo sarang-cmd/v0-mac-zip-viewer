@@ -1,0 +1,183 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* macOS-inspired light palette */
+    --background: 220 14% 96%;
+    --foreground: 220 13% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 13% 13%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 13% 13%;
+    --primary: 211 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 92%;
+    --secondary-foreground: 220 13% 18%;
+    --muted: 220 14% 92%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 211 100% 50%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 87%;
+    --input: 220 13% 87%;
+    --ring: 211 100% 50%;
+    --radius: 0.5rem;
+
+    /* macOS-specific tokens */
+    --mac-toolbar: 220 14% 96%;
+    --mac-sidebar: 220 14% 94%;
+    --mac-content: 0 0% 100%;
+    --mac-separator: 220 13% 87%;
+    --mac-selection: 211 100% 50%;
+    --mac-selection-text: 0 0% 100%;
+    --mac-hover: 220 14% 92%;
+    --mac-text-primary: 220 13% 13%;
+    --mac-text-secondary: 220 9% 46%;
+    --mac-text-tertiary: 220 9% 60%;
+    --mac-vibrancy: 0 0% 100% / 0.72;
+
+    --sidebar-background: 220 14% 94%;
+    --sidebar-foreground: 220 13% 13%;
+    --sidebar-primary: 211 100% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 90%;
+    --sidebar-accent-foreground: 220 13% 13%;
+    --sidebar-border: 220 13% 87%;
+    --sidebar-ring: 211 100% 50%;
+
+    --chart-1: 211 100% 50%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* ── macOS Vibrancy / Frosted Glass ───────────────────────────── */
+
+.mac-vibrancy {
+  background: hsla(var(--mac-vibrancy));
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+
+.mac-toolbar {
+  background: hsla(var(--mac-vibrancy));
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid hsl(var(--mac-separator));
+}
+
+.mac-sidebar {
+  background: hsl(var(--mac-sidebar));
+  border-right: 1px solid hsl(var(--mac-separator));
+}
+
+.mac-content {
+  background: hsl(var(--mac-content));
+}
+
+.mac-inspector {
+  background: hsl(var(--mac-sidebar));
+  border-left: 1px solid hsl(var(--mac-separator));
+}
+
+/* ── Tree focus rings (macOS style) ───────────────────────────── */
+
+.mac-focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px hsl(var(--mac-selection) / 0.4);
+  border-radius: 4px;
+}
+
+/* ── macOS-style scrollbar ────────────────────────────────────── */
+
+.mac-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.mac-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mac-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--mac-text-tertiary) / 0.3);
+  border-radius: 4px;
+}
+
+.mac-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--mac-text-tertiary) / 0.5);
+}
+
+/* ── Selection highlight ──────────────────────────────────────── */
+
+.mac-selected {
+  background: hsl(var(--mac-selection));
+  color: hsl(var(--mac-selection-text));
+}
+
+.mac-selected-muted {
+  background: hsl(var(--mac-selection) / 0.12);
+}
+
+/* ── Smooth transitions ──────────────────────────────────────── */
+
+.mac-transition {
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Context menu styling ─────────────────────────────────────── */
+
+.mac-context-menu {
+  background: hsla(var(--mac-vibrancy));
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid hsl(var(--mac-separator));
+  border-radius: 8px;
+  box-shadow:
+    0 10px 38px -10px rgba(22, 23, 24, 0.35),
+    0 10px 20px -15px rgba(22, 23, 24, 0.2);
+}
+
+/* ── Drop zone ────────────────────────────────────────────────── */
+
+.drop-zone-active {
+  border-color: hsl(var(--mac-selection));
+  background: hsl(var(--mac-selection) / 0.06);
+}
+
+/* ── Search highlight ─────────────────────────────────────────── */
+
+mark.search-highlight {
+  background: hsl(48, 100%, 67%);
+  color: hsl(var(--mac-text-primary));
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* ── Breadcrumb ───────────────────────────────────────────────── */
+
+.breadcrumb-separator::after {
+  content: "\203A";
+  margin: 0 4px;
+  color: hsl(var(--mac-text-tertiary));
+}
