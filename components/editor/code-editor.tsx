@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { EditorTab } from "@/lib/types";
 import { getLanguageFromExtension } from "@/lib/types";
 import { getZipEngine } from "@/lib/zip-engine";
+import { tokenizeLine, TOKEN_COLORS } from "@/lib/syntax-highlight";
 import { X, Search, WrapText, Braces } from "lucide-react";
 
 interface CodeEditorProps {

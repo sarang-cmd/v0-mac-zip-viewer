@@ -23,6 +23,8 @@ import { ContextMenu } from "./context-menu";
 import { SearchResults } from "./search-results";
 import { QuickLook } from "./preview/quick-look";
 import { CodeEditor } from "./editor/code-editor";
+import { ConverterPanel } from "./converter-panel";
+import { getAvailableConversions } from "@/lib/file-converter";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -143,6 +145,9 @@ export function ZipExplorer() {
   const [editorTabs, setEditorTabs] = useState<EditorTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [showEditor, setShowEditor] = useState(false);
+
+  // Converter panel
+  const [converterOpen, setConverterOpen] = useState(false);
 
   // Draggable divider state
   const [sidebarWidth, setSidebarWidth] = useState(208);
@@ -587,6 +592,34 @@ export function ZipExplorer() {
     [editorTabs]
   );
 
+  // ── Converter handlers ───────────────────────────────────────────
+
+  const handleOpenConverter = useCallback(() => {
+    setConverterOpen(true);
+  }, []);
+
+  const handleConversionComplete = useCallback(
+    async (newPath: string) => {
+      // Rebuild tree to show the new file
+      try {
+        const engine = getZipEngine();
+        const result = await engine.rebuildTree();
+        setTree(result.tree);
+        setMetadata({
+          zipFileName: zipFileName,
+          totalFiles: result.totalFiles,
+          totalFolders: result.totalFolders,
+          totalSize: result.totalSize,
+          totalCompressedSize: result.totalCompressedSize,
+          entryCount: result.entryCount,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to update tree after conversion.");
+      }
+    },
+    [zipFileName]
+  );
+
   // ── Divider drag ─────────────────────────────────────────────────
 
   const handleSidebarDividerMouseDown = useCallback(
@@ -786,6 +819,16 @@ export function ZipExplorer() {
 
         {/* Inspector panel */}
         <Inspector node={selectedNode} isOpen={inspectorOpen && tree !== null} />
+
+        {/* Converter panel */}
+        {converterOpen && tree && (
+          <ConverterPanel
+            node={selectedNode}
+            isOpen={converterOpen}
+            onClose={() => setConverterOpen(false)}
+            onConversionComplete={handleConversionComplete}
+          />
+        )}
       </div>
 
       {/* Context menu */}
@@ -804,6 +847,11 @@ export function ZipExplorer() {
             TEXT_EXTENSIONS.has(contextMenu.node.extension)
               ? handleOpenInEditor
               : undefined
+          }
+          onOpenConverter={handleOpenConverter}
+          hasConversions={
+            contextMenu.node.type === "file" &&
+            getAvailableConversions(contextMenu.node.extension).length > 0
           }
           isFavorite={favorites.some((f) => f.path === contextMenu.node.fullPath)}
           onRemoveFavorite={handleRemoveFavorite}

@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import {
   Search, Download, Upload, SidebarClose, SidebarOpen, Info,
   ListTree, List, X, ArrowDownToLine, FileBarChart, Eye,
+  RefreshCw,
 } from "./mac-icons";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -27,6 +28,8 @@ interface ToolbarProps {
   onToggleSidebar: () => void;
   previewOpen: boolean;
   onTogglePreview: () => void;
+  converterOpen: boolean;
+  onToggleConverter: () => void;
   zipFileName: string;
   parseMode: "client" | "server";
   onParseModeChange: (mode: "client" | "server") => void;

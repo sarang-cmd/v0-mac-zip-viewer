@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { getZipEngine } from "@/lib/zip-engine";
 import { getLanguageFromExtension } from "@/lib/types";
+import { tokenizeLine, TOKEN_COLORS } from "@/lib/syntax-highlight";
 
 interface TextPreviewProps {
   filePath: string;
@@ -41,7 +42,13 @@ export function TextPreview({ filePath, extension, onEdit }: TextPreviewProps) {
   }, [filePath]);
 
   const lang = getLanguageFromExtension(extension);
-  const lineCount = content?.split("\n").length ?? 0;
+  const lines = useMemo(() => content?.split("\n") ?? [], [content]);
+
+  // Pre-tokenize all lines for syntax highlighting
+  const highlightedLines = useMemo(() => {
+    if (!content) return [];
+    return lines.map((line) => tokenizeLine(line, lang));
+  }, [lines, lang, content]);
 
   if (loading) {
     return (
@@ -63,7 +70,7 @@ export function TextPreview({ filePath, extension, onEdit }: TextPreviewProps) {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-[hsl(var(--mac-separator))] bg-[hsl(var(--mac-hover)/0.5)]">
         <span className="text-[10px] text-[hsl(var(--mac-text-tertiary))] uppercase tracking-wider">
-          {lang} - {lineCount} lines
+          {lang} - {lines.length} lines
         </span>
         {onEdit && (
           <button
@@ -74,15 +81,29 @@ export function TextPreview({ filePath, extension, onEdit }: TextPreviewProps) {
           </button>
         )}
       </div>
-      <pre className="flex-1 overflow-auto mac-scrollbar p-3 text-xs leading-relaxed font-mono text-[hsl(var(--mac-text-primary))] whitespace-pre-wrap break-words">
-        {content?.split("\n").map((line, i) => (
-          <div key={i} className="flex">
-            <span className="text-[hsl(var(--mac-text-tertiary))] select-none w-10 text-right pr-3 flex-shrink-0 tabular-nums">
-              {i + 1}
-            </span>
-            <span className="flex-1 min-w-0">{line || "\u00A0"}</span>
-          </div>
-        ))}
+      <pre className="flex-1 overflow-auto mac-scrollbar p-0 text-xs leading-[1.65] font-mono">
+        <table className="w-full border-collapse">
+          <tbody>
+            {highlightedLines.map((tokens, i) => (
+              <tr key={i} className="hover:bg-[hsl(var(--mac-hover)/0.4)]">
+                <td className="text-[hsl(var(--mac-text-tertiary)/0.6)] select-none w-12 text-right pr-3 pl-3 align-top tabular-nums border-r border-[hsl(var(--mac-separator)/0.3)] bg-[hsl(var(--mac-hover)/0.2)]">
+                  {i + 1}
+                </td>
+                <td className="pl-4 pr-3 whitespace-pre-wrap break-words">
+                  {tokens.length === 0 ? (
+                    <span>{"\u00A0"}</span>
+                  ) : (
+                    tokens.map((token, j) => (
+                      <span key={j} className={TOKEN_COLORS[token.type]}>
+                        {token.value}
+                      </span>
+                    ))
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </pre>
     </div>
   );
