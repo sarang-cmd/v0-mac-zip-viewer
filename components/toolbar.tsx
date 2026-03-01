@@ -1,34 +1,35 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
-  Search,
-  Download,
-  Upload,
-  SidebarClose,
-  SidebarOpen,
-  Info,
-  ListTree,
-  List,
-  X,
+  Search, Download, Upload, SidebarClose, SidebarOpen, Info,
+  ListTree, List, X, ArrowDownToLine, FileBarChart, Eye,
 } from "./mac-icons";
+import { ThemeToggle } from "./theme-toggle";
 
 interface ToolbarProps {
   onFileSelect: (file: File) => void;
   onSearch: (query: string) => void;
   searchQuery: string;
   onExport: (format: "tree" | "flat") => void;
-  onExportSelected: (format: "tree" | "flat") => void;
+  onExportManifest: () => void;
+  onDownloadZip: () => void;
   hasData: boolean;
   hasSelection: boolean;
+  hasDirtyTabs: boolean;
   entryCount: number;
   totalSize: number;
   isLoading: boolean;
+  loadingProgress: number;
   inspectorOpen: boolean;
   onToggleInspector: () => void;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
+  previewOpen: boolean;
+  onTogglePreview: () => void;
   zipFileName: string;
+  parseMode: "client" | "server";
+  onParseModeChange: (mode: "client" | "server") => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -40,37 +41,26 @@ function formatBytes(bytes: number): string {
 }
 
 export function Toolbar({
-  onFileSelect,
-  onSearch,
-  searchQuery,
-  onExport,
-  onExportSelected,
-  hasData,
-  hasSelection,
-  entryCount,
-  totalSize,
-  isLoading,
-  inspectorOpen,
-  onToggleInspector,
-  sidebarOpen,
-  onToggleSidebar,
-  zipFileName,
+  onFileSelect, onSearch, searchQuery, onExport, onExportManifest,
+  onDownloadZip, hasData, hasDirtyTabs, entryCount, totalSize,
+  isLoading, loadingProgress, inspectorOpen, onToggleInspector,
+  sidebarOpen, onToggleSidebar, previewOpen, onTogglePreview,
+  zipFileName, parseMode, onParseModeChange,
 }: ToolbarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) onFileSelect(file);
-      // Reset so the same file can be selected again
       if (inputRef.current) inputRef.current.value = "";
     },
     [onFileSelect]
   );
 
   return (
-    <div className="mac-toolbar flex items-center gap-2 px-3 py-2 select-none">
+    <header className="mac-toolbar mac-noise flex items-center gap-2 px-3 py-2 select-none">
       {/* Sidebar toggle */}
       <button
         onClick={onToggleSidebar}
@@ -78,17 +68,12 @@ export function Toolbar({
         aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
         title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
       >
-        {sidebarOpen ? (
-          <SidebarClose className="w-4 h-4" />
-        ) : (
-          <SidebarOpen className="w-4 h-4" />
-        )}
+        {sidebarOpen ? <SidebarClose className="w-4 h-4" /> : <SidebarOpen className="w-4 h-4" />}
       </button>
 
-      {/* Separator */}
       <div className="w-px h-5 bg-[hsl(var(--mac-separator))]" />
 
-      {/* Open ZIP button */}
+      {/* Open ZIP */}
       <label className="mac-focus-ring rounded-md">
         <input
           ref={inputRef}
@@ -104,12 +89,37 @@ export function Toolbar({
         </span>
       </label>
 
+      {/* Parse mode toggle */}
+      <div className="flex items-center bg-[hsl(var(--mac-hover))] rounded-md p-0.5">
+        <button
+          onClick={() => onParseModeChange("client")}
+          className={`text-[10px] px-2 py-0.5 rounded mac-transition ${
+            parseMode === "client"
+              ? "bg-[hsl(var(--mac-content))] shadow-sm text-[hsl(var(--mac-text-primary))] font-medium"
+              : "text-[hsl(var(--mac-text-tertiary))]"
+          }`}
+          title="Parse in-browser (privacy-first, no upload)"
+        >
+          Local
+        </button>
+        <button
+          onClick={() => onParseModeChange("server")}
+          className={`text-[10px] px-2 py-0.5 rounded mac-transition ${
+            parseMode === "server"
+              ? "bg-[hsl(var(--mac-content))] shadow-sm text-[hsl(var(--mac-text-primary))] font-medium"
+              : "text-[hsl(var(--mac-text-tertiary))]"
+          }`}
+          title="Parse on server (better for large files)"
+        >
+          Server
+        </button>
+      </div>
+
       {/* Search */}
       <div className="flex-1 max-w-xs ml-2">
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[hsl(var(--mac-text-tertiary))]" />
           <input
-            ref={searchInputRef}
             type="text"
             placeholder="Search"
             value={searchQuery}
@@ -130,8 +140,19 @@ export function Toolbar({
         </div>
       </div>
 
-      {/* Spacer */}
       <div className="flex-1" />
+
+      {/* Loading progress */}
+      {isLoading && (
+        <div className="flex items-center gap-2">
+          <div className="mac-progress w-20">
+            <div className="mac-progress-bar" style={{ width: `${loadingProgress}%` }} />
+          </div>
+          <span className="text-[10px] text-[hsl(var(--mac-text-tertiary))] tabular-nums whitespace-nowrap">
+            {loadingProgress}%
+          </span>
+        </div>
+      )}
 
       {/* Status */}
       {hasData && !isLoading && (
@@ -140,71 +161,85 @@ export function Toolbar({
         </span>
       )}
 
-      {isLoading && (
-        <span className="text-[10px] text-[hsl(var(--mac-text-tertiary))] whitespace-nowrap animate-pulse">
-          Processing...
-        </span>
-      )}
-
-      {/* Separator */}
       {hasData && <div className="w-px h-5 bg-[hsl(var(--mac-separator))]" />}
 
-      {/* Export buttons */}
+      {/* Export / download */}
       {hasData && (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 relative">
           <button
-            onClick={() => onExport("tree")}
+            onClick={() => setShowExportMenu(!showExportMenu)}
             className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md hover:bg-[hsl(var(--mac-hover))] mac-transition mac-focus-ring text-[hsl(var(--mac-text-secondary))]"
-            title="Export as nested tree JSON"
-            aria-label="Export as nested tree JSON"
+            title="Export options"
           >
-            <ListTree className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Tree</span>
+            <Download className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Export</span>
           </button>
-          <button
-            onClick={() => onExport("flat")}
-            className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium rounded-md hover:bg-[hsl(var(--mac-hover))] mac-transition mac-focus-ring text-[hsl(var(--mac-text-secondary))]"
-            title="Export as flat list JSON"
-            aria-label="Export as flat list JSON"
-          >
-            <List className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Flat</span>
-          </button>
-          {hasSelection && (
+
+          {showExportMenu && (
             <>
-              <div className="w-px h-4 bg-[hsl(var(--mac-separator))]" />
-              <button
-                onClick={() => onExportSelected("tree")}
-                className="flex items-center gap-1 px-2 py-1.5 text-[10px] font-medium rounded-md hover:bg-[hsl(var(--mac-hover))] mac-transition mac-focus-ring text-[hsl(var(--mac-text-tertiary))]"
-                title="Export selected subtree"
-                aria-label="Export selected subtree"
-              >
-                <Download className="w-3 h-3" />
-                Selected
-              </button>
+              <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
+              <div className="absolute right-0 top-full mt-1 z-50 mac-context-menu py-1 min-w-[200px]">
+                <button onClick={() => { onExport("tree"); setShowExportMenu(false); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[hsl(var(--mac-text-primary))] hover:bg-[hsl(var(--mac-selection))] hover:text-[hsl(var(--mac-selection-text))] mac-transition rounded-sm mx-0.5" style={{ width: "calc(100% - 4px)" }}>
+                  <ListTree className="w-3.5 h-3.5" />
+                  Export Tree JSON
+                </button>
+                <button onClick={() => { onExport("flat"); setShowExportMenu(false); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[hsl(var(--mac-text-primary))] hover:bg-[hsl(var(--mac-selection))] hover:text-[hsl(var(--mac-selection-text))] mac-transition rounded-sm mx-0.5" style={{ width: "calc(100% - 4px)" }}>
+                  <List className="w-3.5 h-3.5" />
+                  Export Flat JSON
+                </button>
+                <button onClick={() => { onExportManifest(); setShowExportMenu(false); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[hsl(var(--mac-text-primary))] hover:bg-[hsl(var(--mac-selection))] hover:text-[hsl(var(--mac-selection-text))] mac-transition rounded-sm mx-0.5" style={{ width: "calc(100% - 4px)" }}>
+                  <FileBarChart className="w-3.5 h-3.5" />
+                  Export Manifest
+                </button>
+                <div className="my-1 border-t border-[hsl(var(--mac-separator))]" />
+                <button onClick={() => { onDownloadZip(); setShowExportMenu(false); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[hsl(var(--mac-text-primary))] hover:bg-[hsl(var(--mac-selection))] hover:text-[hsl(var(--mac-selection-text))] mac-transition rounded-sm mx-0.5 font-medium" style={{ width: "calc(100% - 4px)" }}>
+                  <ArrowDownToLine className="w-3.5 h-3.5" />
+                  Download Updated ZIP{hasDirtyTabs ? " *" : ""}
+                </button>
+              </div>
             </>
           )}
         </div>
       )}
 
+      {hasData && <div className="w-px h-5 bg-[hsl(var(--mac-separator))]" />}
+
+      {/* Preview toggle */}
+      {hasData && (
+        <button
+          onClick={onTogglePreview}
+          className={`flex items-center justify-center w-7 h-7 rounded-md mac-transition mac-focus-ring ${
+            previewOpen
+              ? "bg-[hsl(var(--mac-selection)/0.12)] text-[hsl(var(--mac-selection))]"
+              : "hover:bg-[hsl(var(--mac-hover))] text-[hsl(var(--mac-text-secondary))]"
+          }`}
+          aria-label={previewOpen ? "Hide preview" : "Show preview"}
+          title={previewOpen ? "Hide Quick Look" : "Show Quick Look"}
+        >
+          <Eye className="w-4 h-4" />
+        </button>
+      )}
+
       {/* Inspector toggle */}
       {hasData && (
-        <>
-          <div className="w-px h-5 bg-[hsl(var(--mac-separator))]" />
-          <button
-            onClick={onToggleInspector}
-            className={`flex items-center justify-center w-7 h-7 rounded-md mac-transition mac-focus-ring ${
-              inspectorOpen
-                ? "bg-[hsl(var(--mac-selection)/0.12)] text-[hsl(var(--mac-selection))]"
-                : "hover:bg-[hsl(var(--mac-hover))] text-[hsl(var(--mac-text-secondary))]"
-            }`}
-            aria-label={inspectorOpen ? "Hide inspector" : "Show inspector"}
-            title={inspectorOpen ? "Hide inspector" : "Show inspector"}
-          >
-            <Info className="w-4 h-4" />
-          </button>
-        </>
+        <button
+          onClick={onToggleInspector}
+          className={`flex items-center justify-center w-7 h-7 rounded-md mac-transition mac-focus-ring ${
+            inspectorOpen
+              ? "bg-[hsl(var(--mac-selection)/0.12)] text-[hsl(var(--mac-selection))]"
+              : "hover:bg-[hsl(var(--mac-hover))] text-[hsl(var(--mac-text-secondary))]"
+          }`}
+          aria-label={inspectorOpen ? "Hide inspector" : "Show inspector"}
+          title={inspectorOpen ? "Hide inspector" : "Show inspector"}
+        >
+          <Info className="w-4 h-4" />
+        </button>
       )}
-    </div>
+
+      <div className="w-px h-5 bg-[hsl(var(--mac-separator))]" />
+
+      {/* Theme toggle */}
+      <ThemeToggle />
+    </header>
   );
 }
